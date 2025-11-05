@@ -143,6 +143,11 @@ CREATE TABLE IF NOT EXISTS conversations (
     -- 来源
     source VARCHAR(50) DEFAULT 'direct' COMMENT '来源: direct/keyword_trigger/manual',
 
+    -- SafeLine 安全评分
+    security_score INT DEFAULT 100 COMMENT '安全评分（0-100）',
+    risk_level ENUM('safe', 'low', 'medium', 'high', 'critical') DEFAULT 'safe' COMMENT '风险等级',
+    risk_factors JSON DEFAULT NULL COMMENT '风险因素列表',
+
     -- 时间戳
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -153,6 +158,8 @@ CREATE TABLE IF NOT EXISTS conversations (
     INDEX idx_assigned_agent (assigned_agent_id),
     INDEX idx_locked_by (locked_by),
     INDEX idx_last_message_at (last_message_at),
+    INDEX idx_risk_level (risk_level),
+    INDEX idx_security_score (security_score),
 
     -- 外键
     FOREIGN KEY (assigned_agent_id) REFERENCES admins(id) ON DELETE SET NULL,
@@ -199,6 +206,11 @@ CREATE TABLE IF NOT EXISTS messages (
     -- 发送账号
     sent_via_account_id BIGINT UNSIGNED DEFAULT NULL COMMENT '发送账号 ID',
 
+    -- SafeLine 威胁检测
+    threat_detected BOOLEAN DEFAULT FALSE COMMENT '是否检测到威胁',
+    threat_level ENUM('LOW', 'MEDIUM', 'HIGH', 'CRITICAL') DEFAULT NULL COMMENT '威胁等级',
+    threat_reason VARCHAR(500) DEFAULT NULL COMMENT '威胁原因',
+
     -- 时间戳
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
 
@@ -208,6 +220,8 @@ CREATE TABLE IF NOT EXISTS messages (
     INDEX idx_from_user (from_user_id),
     INDEX idx_created_at (created_at),
     INDEX idx_is_read (is_read),
+    INDEX idx_threat_detected (threat_detected),
+    INDEX idx_threat_level (threat_level),
 
     -- 外键
     FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
@@ -378,6 +392,278 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='操作日志表';
 
 -- =========================================
+-- SafeLine 防护模块表
+-- =========================================
+
+-- =========================================
+-- 11. security_events 表（安全事件）
+-- =========================================
+CREATE TABLE IF NOT EXISTS security_events (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+
+    -- 用户信息
+    user_id BIGINT NOT NULL COMMENT 'Telegram 用户 ID',
+    username VARCHAR(100) DEFAULT NULL COMMENT '用户名',
+
+    -- 事件类型
+    event_type VARCHAR(50) NOT NULL COMMENT '事件类型: message_blocked/rate_limited/behavior_anomaly/threat_detected',
+    threat_level ENUM('LOW', 'MEDIUM', 'HIGH', 'CRITICAL') NOT NULL COMMENT '威胁等级',
+
+    -- 原因和证据
+    reason VARCHAR(500) NOT NULL COMMENT '拦截/告警原因',
+    evidence JSON DEFAULT NULL COMMENT '证据数据（消息内容、行为数据等）',
+
+    -- 处理状态
+    handled BOOLEAN DEFAULT FALSE COMMENT '是否已处理',
+    handled_by BIGINT UNSIGNED DEFAULT NULL COMMENT '处理人 ID',
+    handled_at DATETIME DEFAULT NULL COMMENT '处理时间',
+    handle_action VARCHAR(100) DEFAULT NULL COMMENT '处理动作',
+    handle_notes TEXT DEFAULT NULL COMMENT '处理备注',
+
+    -- 来源
+    source VARCHAR(50) DEFAULT 'auto' COMMENT '来源: auto/manual/rule',
+    rule_id BIGINT UNSIGNED DEFAULT NULL COMMENT '触发的规则 ID',
+
+    -- 影响
+    action_taken VARCHAR(100) DEFAULT NULL COMMENT '已采取的动作: blocked/warned/logged',
+
+    -- 时间戳
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+
+    -- 索引
+    INDEX idx_user_id (user_id),
+    INDEX idx_event_type (event_type),
+    INDEX idx_threat_level (threat_level),
+    INDEX idx_handled (handled),
+    INDEX idx_created_at (created_at),
+    INDEX idx_handled_by (handled_by),
+
+    -- 外键
+    FOREIGN KEY (handled_by) REFERENCES admins(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='安全事件表';
+
+-- =========================================
+-- 12. user_behaviors 表（用户行为分析）
+-- =========================================
+CREATE TABLE IF NOT EXISTS user_behaviors (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+
+    -- 用户信息
+    user_id BIGINT NOT NULL COMMENT 'Telegram 用户 ID',
+
+    -- 行为维度（6 维）
+    message_frequency DECIMAL(5,2) DEFAULT 0.00 COMMENT '消息频率分数（0-100）',
+    content_diversity DECIMAL(5,2) DEFAULT 0.00 COMMENT '内容多样性分数（0-100）',
+    time_pattern DECIMAL(5,2) DEFAULT 0.00 COMMENT '时间模式分数（0-100）',
+    interaction_depth DECIMAL(5,2) DEFAULT 0.00 COMMENT '互动深度分数（0-100）',
+    response_speed DECIMAL(5,2) DEFAULT 0.00 COMMENT '响应速度分数（0-100）',
+    behavior_consistency DECIMAL(5,2) DEFAULT 0.00 COMMENT '行为一致性分数（0-100）',
+
+    -- 综合评分
+    risk_score INT DEFAULT 0 COMMENT '综合风险评分（0-100）',
+    risk_level ENUM('safe', 'low', 'medium', 'high', 'critical') DEFAULT 'safe' COMMENT '风险等级',
+
+    -- 异常标识
+    is_anomaly BOOLEAN DEFAULT FALSE COMMENT '是否异常',
+    anomaly_reasons JSON DEFAULT NULL COMMENT '异常原因列表',
+
+    -- 统计数据
+    total_messages INT DEFAULT 0 COMMENT '总消息数',
+    spam_count INT DEFAULT 0 COMMENT '垃圾消息数',
+    warning_count INT DEFAULT 0 COMMENT '警告次数',
+    ban_count INT DEFAULT 0 COMMENT '封禁次数',
+
+    -- 最近活动
+    last_message_at DATETIME DEFAULT NULL COMMENT '最后消息时间',
+    last_analyzed_at DATETIME DEFAULT NULL COMMENT '最后分析时间',
+
+    -- 时间戳
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+
+    -- 索引
+    UNIQUE KEY uk_user_id (user_id),
+    INDEX idx_risk_level (risk_level),
+    INDEX idx_risk_score (risk_score),
+    INDEX idx_is_anomaly (is_anomaly),
+    INDEX idx_last_analyzed (last_analyzed_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户行为分析表';
+
+-- =========================================
+-- 13. protection_rules 表（防护规则配置）
+-- =========================================
+CREATE TABLE IF NOT EXISTS protection_rules (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+
+    -- 规则基本信息
+    name VARCHAR(100) NOT NULL COMMENT '规则名称',
+    description TEXT DEFAULT NULL COMMENT '规则描述',
+    category ENUM('spam', 'phishing', 'malicious_link', 'rate_limit', 'behavior', 'custom') NOT NULL COMMENT '规则类别',
+
+    -- 规则配置（JSON 格式）
+    conditions JSON NOT NULL COMMENT '触发条件',
+    actions JSON NOT NULL COMMENT '执行动作',
+
+    -- 严重程度
+    severity ENUM('LOW', 'MEDIUM', 'HIGH', 'CRITICAL') NOT NULL COMMENT '严重程度',
+
+    -- 状态
+    enabled BOOLEAN DEFAULT TRUE COMMENT '是否启用',
+    priority INT DEFAULT 50 COMMENT '优先级（0-100，越高越优先）',
+
+    -- 统计
+    trigger_count INT DEFAULT 0 COMMENT '触发次数',
+    last_triggered_at DATETIME DEFAULT NULL COMMENT '最后触发时间',
+
+    -- 创建者
+    created_by BIGINT UNSIGNED DEFAULT NULL COMMENT '创建者 ID',
+
+    -- 时间戳
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+
+    -- 索引
+    INDEX idx_category (category),
+    INDEX idx_enabled (enabled),
+    INDEX idx_severity (severity),
+    INDEX idx_priority (priority),
+    INDEX idx_created_by (created_by),
+
+    -- 外键
+    FOREIGN KEY (created_by) REFERENCES admins(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='防护规则表';
+
+-- =========================================
+-- 14. threat_intelligence 表（威胁情报）
+-- =========================================
+CREATE TABLE IF NOT EXISTS threat_intelligence (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+
+    -- 威胁标识
+    threat_type ENUM('malicious_ip', 'malicious_domain', 'malicious_hash', 'spam_pattern', 'phishing_url') NOT NULL COMMENT '威胁类型',
+    threat_value VARCHAR(500) NOT NULL COMMENT '威胁值（IP/域名/哈希/模式）',
+
+    -- 威胁级别
+    threat_level ENUM('LOW', 'MEDIUM', 'HIGH', 'CRITICAL') NOT NULL COMMENT '威胁等级',
+    confidence DECIMAL(3,2) DEFAULT 0.50 COMMENT '置信度（0.00-1.00）',
+
+    -- 来源
+    source VARCHAR(100) DEFAULT 'internal' COMMENT '情报来源',
+    source_url VARCHAR(500) DEFAULT NULL COMMENT '情报来源 URL',
+
+    -- 描述
+    description TEXT DEFAULT NULL COMMENT '威胁描述',
+    tags JSON DEFAULT NULL COMMENT '标签列表',
+
+    -- 状态
+    is_active BOOLEAN DEFAULT TRUE COMMENT '是否生效',
+    expires_at DATETIME DEFAULT NULL COMMENT '过期时间',
+
+    -- 统计
+    hit_count INT DEFAULT 0 COMMENT '命中次数',
+    last_hit_at DATETIME DEFAULT NULL COMMENT '最后命中时间',
+
+    -- 时间戳
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+
+    -- 索引
+    INDEX idx_threat_type (threat_type),
+    INDEX idx_threat_value (threat_value(255)),
+    INDEX idx_threat_level (threat_level),
+    INDEX idx_is_active (is_active),
+    INDEX idx_expires_at (expires_at),
+    INDEX idx_last_hit_at (last_hit_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='威胁情报表';
+
+-- =========================================
+-- 15. rate_limit_bans 表（频率限制封禁记录）
+-- =========================================
+CREATE TABLE IF NOT EXISTS rate_limit_bans (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+
+    -- 用户信息
+    user_id BIGINT NOT NULL COMMENT 'Telegram 用户 ID',
+    username VARCHAR(100) DEFAULT NULL COMMENT '用户名',
+
+    -- 封禁类型
+    ban_type ENUM('temporary', 'permanent') NOT NULL COMMENT '封禁类型',
+    ban_reason VARCHAR(500) NOT NULL COMMENT '封禁原因',
+
+    -- 触发信息
+    trigger_type VARCHAR(50) NOT NULL COMMENT '触发类型: message_flood/request_flood',
+    trigger_threshold INT NOT NULL COMMENT '触发阈值',
+    actual_count INT NOT NULL COMMENT '实际次数',
+
+    -- 封禁时间
+    banned_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '封禁时间',
+    expires_at DATETIME DEFAULT NULL COMMENT '解封时间（NULL=永久）',
+
+    -- 状态
+    is_active BOOLEAN DEFAULT TRUE COMMENT '是否生效',
+
+    -- 解封信息
+    unbanned_at DATETIME DEFAULT NULL COMMENT '实际解封时间',
+    unbanned_by BIGINT UNSIGNED DEFAULT NULL COMMENT '解封操作者 ID',
+    unban_reason VARCHAR(500) DEFAULT NULL COMMENT '解封原因',
+
+    -- 时间戳
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+
+    -- 索引
+    INDEX idx_user_id (user_id),
+    INDEX idx_ban_type (ban_type),
+    INDEX idx_is_active (is_active),
+    INDEX idx_expires_at (expires_at),
+    INDEX idx_unbanned_by (unbanned_by),
+
+    -- 外键
+    FOREIGN KEY (unbanned_by) REFERENCES admins(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='频率限制封禁表';
+
+-- =========================================
+-- 16. protection_statistics 表（防护统计）
+-- =========================================
+CREATE TABLE IF NOT EXISTS protection_statistics (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+
+    -- 统计日期
+    date DATE NOT NULL COMMENT '统计日期',
+
+    -- 消息防护统计
+    total_messages INT DEFAULT 0 COMMENT '总消息数',
+    blocked_messages INT DEFAULT 0 COMMENT '拦截消息数',
+    spam_detected INT DEFAULT 0 COMMENT '垃圾消息数',
+    phishing_detected INT DEFAULT 0 COMMENT '钓鱼消息数',
+    malicious_links INT DEFAULT 0 COMMENT '恶意链接数',
+
+    -- 频率限制统计
+    rate_limit_triggered INT DEFAULT 0 COMMENT '频率限制触发次数',
+    temporary_bans INT DEFAULT 0 COMMENT '临时封禁次数',
+    permanent_bans INT DEFAULT 0 COMMENT '永久封禁次数',
+
+    -- 行为分析统计
+    anomaly_detected INT DEFAULT 0 COMMENT '检测到的异常行为数',
+    high_risk_users INT DEFAULT 0 COMMENT '高风险用户数',
+
+    -- 威胁等级分布
+    threat_low INT DEFAULT 0 COMMENT 'LOW 威胁数',
+    threat_medium INT DEFAULT 0 COMMENT 'MEDIUM 威胁数',
+    threat_high INT DEFAULT 0 COMMENT 'HIGH 威胁数',
+    threat_critical INT DEFAULT 0 COMMENT 'CRITICAL 威胁数',
+
+    -- 时间戳
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+
+    -- 索引
+    UNIQUE KEY uk_date (date),
+    INDEX idx_date (date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='防护统计表';
+
+-- =========================================
 -- 初始化数据
 -- =========================================
 
@@ -386,6 +672,46 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 INSERT INTO admins (username, password_hash, nickname, role, permissions, status) VALUES
 ('admin', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5eBVEVZNE3F4i', '系统管理员', 'admin',
  '["chat", "keyword", "account", "admin"]', 'offline');
+
+-- 初始化默认防护规则
+INSERT INTO protection_rules (name, description, category, conditions, actions, severity, enabled, priority) VALUES
+-- 垃圾消息规则
+('重复消息检测', '检测短时间内发送的重复消息', 'spam',
+ '{"type": "duplicate_content", "time_window": 60, "threshold": 3}',
+ '{"action": "warn", "message": "检测到重复消息"}',
+ 'MEDIUM', TRUE, 70),
+
+('高频消息拦截', '拦截每分钟超过 10 条消息的用户', 'rate_limit',
+ '{"type": "message_frequency", "limit": 10, "window": 60}',
+ '{"action": "block", "duration": 300}',
+ 'HIGH', TRUE, 80),
+
+-- 钓鱼检测规则
+('可疑链接检测', '检测常见钓鱼域名和短链接', 'phishing',
+ '{"type": "url_pattern", "patterns": ["bit.ly", "tinyurl.com", "goo.gl", "t.cn"]}',
+ '{"action": "flag", "alert_agent": true}',
+ 'HIGH', TRUE, 90),
+
+-- 恶意内容规则
+('敏感词过滤', '过滤包含敏感词汇的消息', 'spam',
+ '{"type": "keyword_match", "keywords": ["赌博", "诈骗", "博彩", "贷款"]}',
+ '{"action": "block", "notify": true}',
+ 'CRITICAL', TRUE, 95),
+
+('长消息检测', '检测超长消息（可能是垃圾信息）', 'spam',
+ '{"type": "message_length", "max_length": 1000}',
+ '{"action": "warn"}',
+ 'LOW', TRUE, 40);
+
+-- 初始化威胁情报（示例）
+INSERT INTO threat_intelligence (threat_type, threat_value, threat_level, confidence, source, description) VALUES
+('phishing_url', 'bit.ly/scam*', 'HIGH', 0.85, 'internal', '已知钓鱼短链接模式'),
+('spam_pattern', '.*博彩.*', 'CRITICAL', 0.95, 'internal', '博彩垃圾信息关键词'),
+('spam_pattern', '.*加微信.*领取.*', 'MEDIUM', 0.75, 'internal', '诱导添加微信的垃圾信息');
+
+-- 初始化今日防护统计（避免查询空结果）
+INSERT INTO protection_statistics (date, total_messages, blocked_messages) VALUES
+(CURDATE(), 0, 0);
 
 -- =========================================
 -- 视图（方便查询）
@@ -430,6 +756,77 @@ SELECT
     avg_response_time,
     online_minutes
 FROM statistics
+WHERE date = CURDATE();
+
+-- SafeLine 安全事件视图（未处理的高危事件）
+CREATE OR REPLACE VIEW v_unhandled_threats AS
+SELECT
+    se.id,
+    se.user_id,
+    se.username,
+    se.event_type,
+    se.threat_level,
+    se.reason,
+    se.action_taken,
+    se.created_at,
+    ub.risk_score,
+    ub.risk_level
+FROM security_events se
+LEFT JOIN user_behaviors ub ON se.user_id = ub.user_id
+WHERE se.handled = FALSE
+  AND se.threat_level IN ('HIGH', 'CRITICAL')
+ORDER BY se.threat_level DESC, se.created_at DESC;
+
+-- 高风险用户视图
+CREATE OR REPLACE VIEW v_high_risk_users AS
+SELECT
+    ub.user_id,
+    c.username,
+    c.first_name,
+    c.last_name,
+    ub.risk_score,
+    ub.risk_level,
+    ub.anomaly_reasons,
+    ub.total_messages,
+    ub.spam_count,
+    ub.warning_count,
+    ub.ban_count,
+    c.security_score,
+    c.risk_factors,
+    ub.last_message_at,
+    COUNT(se.id) as recent_violations
+FROM user_behaviors ub
+LEFT JOIN conversations c ON ub.user_id = c.user_id
+LEFT JOIN security_events se ON ub.user_id = se.user_id
+    AND se.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+WHERE ub.risk_level IN ('high', 'critical')
+GROUP BY ub.user_id, c.username, c.first_name, c.last_name, ub.risk_score,
+         ub.risk_level, ub.anomaly_reasons, ub.total_messages, ub.spam_count,
+         ub.warning_count, ub.ban_count, c.security_score, c.risk_factors,
+         ub.last_message_at
+ORDER BY ub.risk_score DESC;
+
+-- 今日防护统计视图
+CREATE OR REPLACE VIEW v_today_protection_stats AS
+SELECT
+    date,
+    total_messages,
+    blocked_messages,
+    ROUND((blocked_messages / NULLIF(total_messages, 0)) * 100, 2) as block_rate,
+    spam_detected,
+    phishing_detected,
+    malicious_links,
+    rate_limit_triggered,
+    temporary_bans,
+    permanent_bans,
+    anomaly_detected,
+    high_risk_users,
+    (threat_low + threat_medium + threat_high + threat_critical) as total_threats,
+    threat_low,
+    threat_medium,
+    threat_high,
+    threat_critical
+FROM protection_statistics
 WHERE date = CURDATE();
 
 -- =========================================
