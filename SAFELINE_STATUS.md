@@ -128,15 +128,63 @@
     - 最近会话时间线
     - 安全事件时间线
 
+  - ✅ **客服工作台 (Workbench)** - **实时消息更新** ⚡
+    - 三栏布局（会话列表 + 聊天窗口 + 用户信息）
+    - 会话列表（搜索、筛选、未读徽章、锁定状态）
+    - 实时聊天窗口（文本/图片/文件支持）
+    - 威胁检测提示（红色警告框）
+    - 正在输入动画
+    - 用户安全评分仪表盘（0-100）
+    - 风险等级和因素显示
+    - WebSocket 实时消息推送
+    - 会话锁定/解锁机制
+    - 示例数据（3个模拟会话）
+
   - 🚧 其他页面（占位）
     - 防护控制台 (Protection)
-    - 客服工作台 (Workbench) - **实时消息更新**
     - 威胁情报 (ThreatIntelligence)
     - 实时监控 (Monitor)
     - 账号管理 (Accounts)
     - 系统设置 (Settings)
 
-### 6. 代码特点
+### 6. 后端 WebSocket 处理器
+- **文件**: `backend/websocket_handler.py`
+- **功能**:
+  - ✅ ConnectionManager 连接管理器
+    - 多客服并发连接（字典管理）
+    - 会话房间管理（conversation_id → agent_ids）
+    - 客服状态跟踪（online/busy/away/offline）
+    - 会话锁定状态（防止多客服同时回复）
+
+  - ✅ WebSocket 事件处理
+    - 消息事件: new_message, message_sent
+    - 会话事件: conversation_assigned, session_locked, session_unlocked
+    - 安全事件: security_alert, threat_detected, user_banned
+    - 统计事件: stats_update
+    - 系统事件: agent_status, typing, ping/pong
+
+  - ✅ 消息广播机制
+    - 个人消息（send_personal_message）
+    - 会话房间广播（send_to_conversation）
+    - 全局广播（broadcast）
+    - 支持排除特定客服
+
+  - ✅ 会话锁定机制
+    - lock_conversation() - 锁定会话并通知其他客服
+    - unlock_conversation() - 解锁会话
+    - is_conversation_locked() - 检查锁定状态
+
+  - ✅ 辅助函数（供其他模块调用）
+    - notify_new_message() - 消息处理器调用
+    - notify_security_alert() - 防护模块调用
+    - notify_threat_detected() - 威胁检测调用
+    - update_stats() - 统计更新
+
+  - ✅ FastAPI 集成
+    - WebSocket 端点: /ws/{agent_id}
+    - 统计端点: /ws/stats（查看在线客服数）
+
+### 7. 代码特点
 - 🎯 **参考 SafeLine 设计理念**
 - 🚀 **异步支持**（async/await）
 - 📊 **实时统计**
@@ -171,7 +219,7 @@ class ThreatIntelligence:
 ## 📈 完成度
 
 ```
-总体进度: ██████████████░░░░░░ 70%
+总体进度: ███████████████░░░░░ 80%
 
 模块进度:
 ├─ 架构设计        ████████████████████ 100%
@@ -179,12 +227,16 @@ class ThreatIntelligence:
 ├─ 行为分析        ████████████████████ 100%
 ├─ 频率限制        ████████████████████ 100%
 ├─ 威胁情报        ████████████████████ 100%
-├─ 前端界面        ████████░░░░░░░░░░░░  40%
+├─ WebSocket 通信  ████████████████████ 100%
+│  ├─ 后端处理器   ████████████████████ 100%
+│  ├─ 前端封装     ████████████████████ 100%
+│  └─ Pinia Store  ████████████████████ 100%
+├─ 前端界面        ████████████░░░░░░░░  60%
 │  ├─ 项目搭建     ████████████████████ 100%
 │  ├─ 主题样式     ████████████████████ 100%
-│  ├─ WebSocket    ████████████████████ 100%
 │  ├─ 布局组件     ████████████████████ 100%
 │  ├─ 数据概览     ████████████████████ 100%
+│  ├─ 客服工作台   ████████████████████ 100%
 │  └─ 其他页面     ░░░░░░░░░░░░░░░░░░░░   0%
 └─ 集成测试        ░░░░░░░░░░░░░░░░░░░░   0%
 ```
@@ -406,18 +458,21 @@ $ python backend/protection/message_protection.py
 1. [x] ~~完成用户行为分析模块~~ ✅
 2. [x] ~~实现频率限制器（Redis）~~ ✅
 3. [x] ~~Vue 3 前端项目搭建（SafeLine 风格）~~ ✅
-4. [ ] **客服工作台页面（实时消息 WebSocket）**
-5. [ ] **后端 WebSocket 处理器（FastAPI）**
-6. [ ] 集成防护模块到 message_handler.py
+4. [x] ~~客服工作台页面（实时消息 WebSocket）~~ ✅
+5. [x] ~~后端 WebSocket 处理器（FastAPI）~~ ✅
+6. [ ] **集成防护模块到 message_handler.py**
 7. [ ] 添加数据库表（security_events, protection_rules 等）
+8. [ ] 连接真实 API 接口（会话列表、消息历史）
 
 ### 中优先级 ⚡
-8. [x] ~~威胁情报系统~~ ✅
-9. [x] ~~自动化响应机制~~ ✅
-10. [ ] 前端防护控制台页面
-11. [ ] 实时监控面板
-12. [ ] 威胁情报中心页面
-13. [ ] API 接口（查询统计、配置规则等）
+9. [x] ~~威胁情报系统~~ ✅
+10. [x] ~~自动化响应机制~~ ✅
+11. [ ] 前端防护控制台页面
+12. [ ] 实时监控面板
+13. [ ] 威胁情报中心页面
+14. [ ] API 接口（查询统计、配置规则等）
+15. [ ] 图片/文件上传功能
+16. [ ] 快捷回复功能
 
 ### 低优先级 💡
 13. [ ] AI 辅助检测（可选）
