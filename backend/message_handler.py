@@ -22,6 +22,18 @@ from bson import ObjectId
 
 from account_manager import get_account_manager
 
+# 导入防护模块
+from protection import (
+    get_protection_engine,
+    get_rate_limiter,
+    ThreatLevel
+)
+from protection.behavior_analyzer import BehaviorAnalyzer
+from websocket_handler import (
+    notify_security_alert,
+    notify_threat_detected
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -39,11 +51,17 @@ class MessageProcessor:
         self.keywords = self.db['keywords']
         self.quick_replies = self.db['quick_replies']
         self.statistics = self.db['statistics']
+        self.security_events = self.db['security_events']  # 安全事件表
 
         # WebSocket 连接池（用于实时推送到前端）
         self.ws_connections: Dict[str, list] = {}  # agent_id -> [websockets]
 
-        logger.info("消息处理器初始化完成")
+        # 初始化防护模块
+        self.protection_engine = get_protection_engine()
+        self.rate_limiter = get_rate_limiter()
+        self.behavior_analyzer = BehaviorAnalyzer(self.db)
+
+        logger.info("✅ 消息处理器初始化完成（已启用 SafeLine 防护）")
 
     # ==================== 用户消息处理 ====================
 
@@ -82,7 +100,95 @@ class MessageProcessor:
 
             logger.info(f"创建新会话: User {user_id} ({username})")
 
-        # 2. 保存消息到数据库
+        # 2. 安全检测（SafeLine 防护）
+        protection_result = None
+        threat_detected = False
+        threat_level = None
+        threat_reason = None
+
+        if message.text:
+            # 2.1 消息内容防护检测
+            protection_result = await self.protection_engine.check_message({
+                'text': message.text,
+                'user_id': user_id,
+                'chat_id': message.chat.id
+            })
+
+            if protection_result.is_blocked:
+                threat_detected = True
+                threat_level = protection_result.threat_level.value
+                threat_reason = protection_result.reason
+
+                logger.warning(
+                    f"🚨 [安全拦截] 用户 {user_id}: {threat_reason} "
+                    f"(威胁等级: {threat_level})"
+                )
+
+                # 记录安全事件
+                await self._record_security_event(
+                    user_id=user_id,
+                    event_type="message_blocked",
+                    threat_level=threat_level,
+                    reason=threat_reason,
+                    evidence={
+                        'message_text': message.text,
+                        'detection_details': protection_result.details
+                    }
+                )
+
+                # WebSocket 实时通知客服
+                await notify_threat_detected({
+                    'user_id': user_id,
+                    'username': username,
+                    'threat_type': 'message_content',
+                    'threat_level': threat_level,
+                    'description': threat_reason,
+                    'message': message.text[:100],
+                    'timestamp': datetime.now().isoformat()
+                })
+
+        # 2.2 频率限制检查
+        rate_limit_result = await self.rate_limiter.check_rate_limit(
+            user_id=user_id,
+            limit_type="message",
+            scope=f"chat:{message.chat.id}"
+        )
+
+        if not rate_limit_result.allowed:
+            logger.warning(
+                f"⚠️ [频率限制] 用户 {user_id}: {rate_limit_result.reason}"
+            )
+
+            # 记录安全事件
+            await self._record_security_event(
+                user_id=user_id,
+                event_type="rate_limit_exceeded",
+                threat_level="MEDIUM",
+                reason=rate_limit_result.reason,
+                evidence={
+                    'current_count': rate_limit_result.current_count,
+                    'limit': rate_limit_result.limit
+                }
+            )
+
+            # 通知客服
+            await notify_security_alert({
+                'user_id': user_id,
+                'username': username,
+                'alert_type': 'rate_limit',
+                'threat_level': 'MEDIUM',
+                'reason': rate_limit_result.reason,
+                'timestamp': datetime.now().isoformat()
+            })
+
+            # 如果是封禁状态，直接返回
+            if rate_limit_result.action.value == 'BAN_TEMPORARY':
+                return
+
+        # 2.3 用户行为分析（异步执行，不阻塞消息处理）
+        asyncio.create_task(self._analyze_user_behavior(user_id, message.text))
+
+        # 3. 保存消息到数据库（包含威胁检测结果）
         message_doc = await self._save_message(
             conversation_id=conversation['_id'],
             direction="incoming",
@@ -93,7 +199,10 @@ class MessageProcessor:
             text=message.text or message.caption,
             media=await self._extract_media(message),
             tg_message_id=message.id,
-            chat_id=message.chat.id
+            chat_id=message.chat.id,
+            threat_detected=threat_detected,
+            threat_level=threat_level,
+            threat_reason=threat_reason
         )
 
         # 3. 更新会话统计
@@ -416,6 +525,10 @@ class MessageProcessor:
             "is_read": False,
             "is_deleted": False,
             "sent_via_account_id": kwargs.get('sent_via_account_id'),
+            # 安全检测相关字段
+            "threat_detected": kwargs.get('threat_detected', False),
+            "threat_level": kwargs.get('threat_level'),
+            "threat_reason": kwargs.get('threat_reason'),
             "created_at": datetime.now()
         }
 
@@ -487,6 +600,93 @@ class MessageProcessor:
         """推送关键词触发提醒到前端"""
         # TODO: 实现 WebSocket 推送
         pass
+
+    # ==================== 安全防护辅助方法 ====================
+
+    async def _record_security_event(
+        self,
+        user_id: int,
+        event_type: str,
+        threat_level: str,
+        reason: str,
+        evidence: dict
+    ):
+        """
+        记录安全事件到数据库
+
+        Args:
+            user_id: 用户 ID
+            event_type: 事件类型（message_blocked, rate_limit_exceeded 等）
+            threat_level: 威胁等级（LOW, MEDIUM, HIGH, CRITICAL）
+            reason: 原因描述
+            evidence: 证据数据
+        """
+        event_doc = {
+            "user_id": user_id,
+            "event_type": event_type,
+            "threat_level": threat_level,
+            "reason": reason,
+            "evidence": evidence,
+            "handled": False,
+            "handled_by": None,
+            "handled_at": None,
+            "created_at": datetime.now()
+        }
+
+        try:
+            await self.security_events.insert_one(event_doc)
+            logger.info(
+                f"📝 [安全事件记录] 用户 {user_id}: {event_type} "
+                f"(威胁等级: {threat_level})"
+            )
+        except Exception as e:
+            logger.error(f"记录安全事件失败: {e}")
+
+    async def _analyze_user_behavior(self, user_id: int, message_text: Optional[str]):
+        """
+        异步分析用户行为
+
+        Args:
+            user_id: 用户 ID
+            message_text: 消息文本
+        """
+        try:
+            # 执行行为分析
+            profile = await self.behavior_analyzer.analyze_user(user_id)
+
+            logger.info(
+                f"👤 [行为分析] 用户 {user_id}: "
+                f"风险评分={profile.risk_score}, "
+                f"风险等级={profile.risk_level}"
+            )
+
+            # 如果风险评分高，发送安全告警
+            if profile.risk_score >= 70:
+                await notify_security_alert({
+                    'user_id': user_id,
+                    'alert_type': 'high_risk_behavior',
+                    'threat_level': profile.risk_level,
+                    'risk_score': profile.risk_score,
+                    'risk_factors': profile.risk_factors,
+                    'reason': f"用户行为异常，风险评分: {profile.risk_score}",
+                    'timestamp': datetime.now().isoformat()
+                })
+
+                # 记录安全事件
+                await self._record_security_event(
+                    user_id=user_id,
+                    event_type="high_risk_behavior",
+                    threat_level=profile.risk_level,
+                    reason=f"用户行为异常，风险评分: {profile.risk_score}",
+                    evidence={
+                        'risk_score': profile.risk_score,
+                        'risk_factors': profile.risk_factors,
+                        'anomalies': profile.anomalies
+                    }
+                )
+
+        except Exception as e:
+            logger.error(f"用户行为分析失败: {e}")
 
 
 # 全局单例

@@ -1,250 +1,124 @@
 # -*- coding: utf-8 -*-
 """
-数据库连接和会话管理（MySQL 版本）
+数据库连接和工具类
+支持 MySQL (使用 SQLAlchemy) 和 MongoDB (使用 Motor)
 """
 import os
-import logging
-from contextlib import contextmanager, asynccontextmanager
-from typing import Generator, AsyncGenerator
-
-from sqlalchemy import create_engine
+from typing import AsyncGenerator, Optional
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy.orm import sessionmaker, Session
-from sqlalchemy.pool import QueuePool
+from sqlalchemy.orm import declarative_base
+from sqlalchemy import text
 
-from models import Base
+# SQLAlchemy Base
+Base = declarative_base()
 
-logger = logging.getLogger(__name__)
-
-# ==================== 配置 ====================
-
-# MySQL 连接配置
-MYSQL_HOST = os.getenv("MYSQL_HOST", "localhost")
-MYSQL_PORT = int(os.getenv("MYSQL_PORT", "3306"))
-MYSQL_USER = os.getenv("MYSQL_USER", "root")
-MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "password")
-MYSQL_DATABASE = os.getenv("MYSQL_DATABASE", "telegram_customer")
-
-# 同步连接 URL
-DATABASE_URL = f"mysql+pymysql://{MYSQL_USER}:{MYSQL_PASSWORD}@{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DATABASE}?charset=utf8mb4"
-
-# 异步连接 URL（使用 aiomysql）
-ASYNC_DATABASE_URL = f"mysql+aiomysql://{MYSQL_USER}:{MYSQL_PASSWORD}@{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DATABASE}?charset=utf8mb4"
-
-# ==================== 同步数据库引擎 ====================
-
-# 同步引擎（用于数据库初始化和简单查询）
-engine = create_engine(
-    DATABASE_URL,
-    poolclass=QueuePool,
-    pool_size=20,  # 连接池大小
-    max_overflow=40,  # 溢出连接数
-    pool_recycle=3600,  # 连接回收时间（秒）
-    pool_pre_ping=True,  # 连接前 ping 检测
-    echo=False  # 是否打印 SQL（开发时可设为 True）
-)
-
-# 同步会话工厂
-SessionLocal = sessionmaker(
-    bind=engine,
-    autocommit=False,
-    autoflush=False
-)
-
-# ==================== 异步数据库引擎 ====================
-
-# 异步引擎（用于 FastAPI）
-async_engine = create_async_engine(
-    ASYNC_DATABASE_URL,
-    poolclass=QueuePool,
-    pool_size=20,
-    max_overflow=40,
-    pool_recycle=3600,
-    pool_pre_ping=True,
-    echo=False
-)
-
-# 异步会话工厂
-AsyncSessionLocal = async_sessionmaker(
-    bind=async_engine,
-    class_=AsyncSession,
-    autocommit=False,
-    autoflush=False,
-    expire_on_commit=False
-)
-
-# ==================== 数据库初始化 ====================
+# 全局变量
+_async_engine = None
+_async_session_maker = None
 
 
-def init_database():
-    """初始化数据库（创建所有表）"""
-    try:
-        logger.info("正在初始化数据库...")
+def get_mysql_url() -> str:
+    """获取 MySQL 连接 URL"""
+    # 从环境变量读取配置
+    host = os.getenv("MYSQL_HOST", "localhost")
+    port = int(os.getenv("MYSQL_PORT", "3306"))
+    user = os.getenv("MYSQL_USER", "root")
+    password = os.getenv("MYSQL_PASSWORD", "")
+    database = os.getenv("MYSQL_DATABASE", "telegram_customer")
 
-        # 创建所有表
-        Base.metadata.create_all(bind=engine)
-
-        logger.info("✅ 数据库初始化完成")
-
-    except Exception as e:
-        logger.error(f"❌ 数据库初始化失败: {e}")
-        raise
+    # 使用 aiomysql 驱动（异步）
+    return f"mysql+aiomysql://{user}:{password}@{host}:{port}/{database}?charset=utf8mb4"
 
 
-def drop_all_tables():
-    """删除所有表（危险操作！）"""
-    logger.warning("⚠️ 正在删除所有表...")
-    Base.metadata.drop_all(bind=engine)
-    logger.info("✅ 所有表已删除")
+async def init_mysql():
+    """初始化 MySQL 连接池"""
+    global _async_engine, _async_session_maker
+
+    mysql_url = get_mysql_url()
+
+    # 创建异步引擎
+    _async_engine = create_async_engine(
+        mysql_url,
+        echo=False,  # 设为 True 可以看到 SQL 日志
+        pool_size=10,
+        max_overflow=20,
+        pool_pre_ping=True,  # 连接前检测可用性
+    )
+
+    # 创建 Session 工厂
+    _async_session_maker = async_sessionmaker(
+        _async_engine,
+        class_=AsyncSession,
+        expire_on_commit=False
+    )
+
+    # 测试连接
+    async with _async_engine.begin() as conn:
+        await conn.execute(text("SELECT 1"))
+
+    return _async_engine
 
 
-# ==================== 同步会话管理 ====================
+async def close_mysql():
+    """关闭 MySQL 连接池"""
+    global _async_engine
 
-@contextmanager
-def get_db() -> Generator[Session, None, None]:
+    if _async_engine:
+        await _async_engine.dispose()
+        _async_engine = None
+
+
+def get_mysql_engine():
+    """获取 MySQL 引擎"""
+    return _async_engine
+
+
+async def get_mysql_session() -> AsyncGenerator[AsyncSession, None]:
     """
-    获取同步数据库会话（上下文管理器）
+    获取 MySQL Session（用于依赖注入）
 
     用法:
-        with get_db() as db:
-            user = db.query(User).filter_by(id=1).first()
+    ```python
+    @app.get("/api/data")
+    async def get_data(session: AsyncSession = Depends(get_mysql_session)):
+        result = await session.execute(select(Model))
+        return result.scalars().all()
+    ```
     """
-    db = SessionLocal()
-    try:
-        yield db
-        db.commit()
-    except Exception as e:
-        db.rollback()
-        logger.error(f"数据库操作失败: {e}")
-        raise
-    finally:
-        db.close()
+    if not _async_session_maker:
+        raise RuntimeError("MySQL 未初始化，请先调用 init_mysql()")
 
-
-# ==================== 异步会话管理 ====================
-
-@asynccontextmanager
-async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
-    """
-    获取异步数据库会话（上下文管理器）
-
-    用法:
-        async with get_async_db() as db:
-            result = await db.execute(select(User).filter_by(id=1))
-            user = result.scalar_one_or_none()
-    """
-    async with AsyncSessionLocal() as session:
+    async with _async_session_maker() as session:
         try:
             yield session
             await session.commit()
-        except Exception as e:
+        except Exception:
             await session.rollback()
-            logger.error(f"数据库操作失败: {e}")
             raise
         finally:
             await session.close()
 
 
-async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
+async def execute_raw_sql(query: str, params: Optional[dict] = None):
     """
-    获取异步数据库会话（用于 FastAPI 依赖注入）
+    执行原始 SQL 查询（适用于复杂查询和视图）
 
-    用法:
-        @app.get("/users")
-        async def get_users(db: AsyncSession = Depends(get_db_session)):
-            result = await db.execute(select(User))
-            return result.scalars().all()
+    Args:
+        query: SQL 查询语句
+        params: 查询参数（使用 :param_name 格式）
+
+    Returns:
+        查询结果（字典列表）
     """
-    async with AsyncSessionLocal() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception as e:
-            await session.rollback()
-            logger.error(f"数据库操作失败: {e}")
-            raise
+    if not _async_engine:
+        raise RuntimeError("MySQL 未初始化，请先调用 init_mysql()")
 
+    async with _async_engine.begin() as conn:
+        result = await conn.execute(text(query), params or {})
 
-# ==================== 数据库健康检查 ====================
+        # 将结果转换为字典列表
+        if result.returns_rows:
+            columns = result.keys()
+            return [dict(zip(columns, row)) for row in result.fetchall()]
 
-async def check_database_health() -> bool:
-    """检查数据库连接是否正常"""
-    try:
-        async with get_async_db() as db:
-            await db.execute("SELECT 1")
-        return True
-    except Exception as e:
-        logger.error(f"数据库健康检查失败: {e}")
-        return False
-
-
-# ==================== 关闭连接 ====================
-
-async def close_database():
-    """关闭数据库连接"""
-    try:
-        await async_engine.dispose()
-        engine.dispose()
-        logger.info("数据库连接已关闭")
-    except Exception as e:
-        logger.error(f"关闭数据库连接失败: {e}")
-
-
-# ==================== 测试连接 ====================
-
-def test_connection():
-    """测试数据库连接"""
-    try:
-        with engine.connect() as conn:
-            result = conn.execute("SELECT 1")
-            logger.info("✅ 数据库连接测试成功")
-            return True
-    except Exception as e:
-        logger.error(f"❌ 数据库连接测试失败: {e}")
-        return False
-
-
-# ==================== 工具函数 ====================
-
-def get_table_names() -> list:
-    """获取所有表名"""
-    from sqlalchemy import inspect
-    inspector = inspect(engine)
-    return inspector.get_table_names()
-
-
-def get_table_info(table_name: str) -> dict:
-    """获取表结构信息"""
-    from sqlalchemy import inspect
-    inspector = inspect(engine)
-
-    columns = inspector.get_columns(table_name)
-    indexes = inspector.get_indexes(table_name)
-    foreign_keys = inspector.get_foreign_keys(table_name)
-
-    return {
-        "columns": columns,
-        "indexes": indexes,
-        "foreign_keys": foreign_keys
-    }
-
-
-# ==================== 初始化脚本 ====================
-
-if __name__ == "__main__":
-    # 测试连接
-    print("测试数据库连接...")
-    if test_connection():
-        print("✅ 连接成功")
-
-        # 初始化数据库
-        print("\n初始化数据库表...")
-        init_database()
-
-        # 显示表列表
-        print("\n已创建的表:")
-        for table in get_table_names():
-            print(f"  - {table}")
-
-    else:
-        print("❌ 连接失败，请检查配置")
+        return []

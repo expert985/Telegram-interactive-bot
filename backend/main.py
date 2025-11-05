@@ -24,6 +24,8 @@ from account_manager import init_account_manager, get_account_manager
 from message_handler import init_message_processor, get_message_processor
 from account_login import get_account_login_manager
 from websocket_handler import handle_websocket, get_connection_manager
+from database import init_mysql, close_mysql, execute_raw_sql
+import api_security
 
 # ==================== 配置 ====================
 
@@ -51,6 +53,14 @@ async def lifespan(app: FastAPI):
 
     # 启动时初始化
     global mongo_client, db, redis_client
+
+    # 连接 MySQL
+    try:
+        await init_mysql()
+        logger.info("✅ MySQL 已连接")
+    except Exception as e:
+        logger.warning(f"⚠️ MySQL 连接失败: {e}")
+        logger.info("将使用 MongoDB 作为主数据库")
 
     # 连接 MongoDB
     mongo_client = AsyncIOMotorClient(MONGO_URI)
@@ -81,6 +91,7 @@ async def lifespan(app: FastAPI):
     await account_mgr.close_all()
 
     # 关闭数据库连接
+    await close_mysql()
     mongo_client.close()
     await redis_client.close()
 
@@ -104,6 +115,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 包含安全 API 路由
+app.include_router(api_security.router)
 
 # HTTP Bearer 认证
 security = HTTPBearer()
@@ -477,7 +491,11 @@ async def get_conversations(
             "last_message_preview": conv.get('last_message_preview'),
             "tags": conv.get('tags', []),
             "locked_by": str(conv['locked_by']) if conv.get('locked_by') else None,
-            "created_at": conv.get('created_at')
+            "created_at": conv.get('created_at'),
+            # SafeLine 安全字段
+            "security_score": conv.get('security_score', 100),
+            "risk_level": conv.get('risk_level', 'safe'),
+            "risk_factors": conv.get('risk_factors', [])
         }
         for conv in conversations
     ]
@@ -516,7 +534,11 @@ async def get_conversation_messages(
             "text": msg.get('text'),
             "media": msg.get('media'),
             "is_read": msg.get('is_read', False),
-            "created_at": msg.get('created_at')
+            "created_at": msg.get('created_at'),
+            # SafeLine 威胁检测字段
+            "threat_detected": msg.get('threat_detected', False),
+            "threat_level": msg.get('threat_level'),
+            "threat_reason": msg.get('threat_reason')
         }
         for msg in messages
     ]
