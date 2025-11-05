@@ -23,6 +23,7 @@ import bcrypt
 from account_manager import init_account_manager, get_account_manager
 from message_handler import init_message_processor, get_message_processor
 from account_login import get_account_login_manager
+from websocket_handler import handle_websocket, get_connection_manager
 
 # ==================== 配置 ====================
 
@@ -713,21 +714,34 @@ async def create_quick_reply(
 
 @app.websocket("/ws/{agent_id}")
 async def websocket_endpoint(websocket: WebSocket, agent_id: str):
-    """WebSocket 连接（用于实时推送消息）"""
-    await websocket.accept()
+    """
+    WebSocket 连接（用于实时推送消息）
 
-    logger.info(f"WebSocket 连接建立: Agent {agent_id}")
+    功能:
+    - 实时消息推送（用户 → 客服）
+    - 会话管理（加入/离开会话房间）
+    - 会话锁定（防止多客服同时回复）
+    - 安全事件推送
+    - 统计数据更新
+    - 心跳保活
 
-    try:
-        while True:
-            # 接收前端消息（心跳）
-            data = await websocket.receive_text()
+    Args:
+        agent_id: 客服 ID
+    """
+    await handle_websocket(websocket, agent_id)
 
-            # 这里可以实现实时消息推送
-            # TODO: 从 Redis 队列中读取新消息并推送
 
-    except WebSocketDisconnect:
-        logger.info(f"WebSocket 连接断开: Agent {agent_id}")
+@app.get("/ws/stats")
+async def get_websocket_stats():
+    """获取 WebSocket 连接统计"""
+    manager = get_connection_manager()
+
+    return {
+        "online_agents": manager.get_online_agents(),
+        "online_count": manager.get_agent_count(),
+        "active_conversations": len(manager.conversation_rooms),
+        "locked_conversations": len(manager.conversation_locks)
+    }
 
 
 # ==================== 健康检查 ====================
