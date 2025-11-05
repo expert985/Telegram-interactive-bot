@@ -1,0 +1,29 @@
+# Web 框架
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+websockets==12.0
+
+# Telegram 客户端
+pyrogram==2.0.106
+TGCrypto==1.2.5
+python-telegram-bot==20.7
+
+# 数据库
+motor==3.3.2  # MongoDB 异步驱动
+pymongo==4.6.1
+redis==5.0.1
+
+# 认证和安全
+PyJWT==2.8.0
+bcrypt==4.1.2
+python-jose[cryptography]==3.3.0
+
+# 工具库
+python-dotenv==1.0.0
+pydantic==2.5.2
+certifi==2023.11.17
+
+# 其他
+requests==2.31.0
+aiofiles==23.2.1
