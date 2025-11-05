@@ -1,0 +1,320 @@
+/* ==================== SafeLine 风格暗色主题 ==================== */
+
+/* 全局变量 */
+:root {
+  /* 主色调 - SafeLine 蓝紫色 */
+  --safeline-primary: #6366f1;
+  --safeline-primary-light: #818cf8;
+  --safeline-primary-dark: #4f46e5;
+
+  /* 背景色 - 深色系 */
+  --safeline-bg-primary: #0f1419;
+  --safeline-bg-secondary: #1a1f2e;
+  --safeline-bg-tertiary: #232938;
+  --safeline-bg-hover: #2a3142;
+
+  /* 边框色 */
+  --safeline-border-color: #2a3142;
+  --safeline-border-light: #343d4f;
+
+  /* 文字色 */
+  --safeline-text-primary: #ffffff;
+  --safeline-text-secondary: #9ca3af;
+  --safeline-text-tertiary: #6b7280;
+  --safeline-text-disabled: #4b5563;
+
+  /* 状态色 */
+  --safeline-success: #10b981;
+  --safeline-warning: #f59e0b;
+  --safeline-danger: #ef4444;
+  --safeline-info: #3b82f6;
+
+  /* 威胁等级色 */
+  --threat-low: #10b981;
+  --threat-medium: #f59e0b;
+  --threat-high: #f97316;
+  --threat-critical: #dc2626;
+
+  /* 阴影 */
+  --safeline-shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.5);
+  --safeline-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
+  --safeline-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+
+  /* 圆角 */
+  --safeline-radius-sm: 4px;
+  --safeline-radius-md: 6px;
+  --safeline-radius-lg: 8px;
+}
+
+/* 重置样式 */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
+    'Noto Color Emoji';
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--safeline-text-primary);
+  background-color: var(--safeline-bg-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 滚动条样式 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--safeline-bg-secondary);
+  border-radius: var(--safeline-radius-sm);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--safeline-bg-hover);
+  border-radius: var(--safeline-radius-sm);
+
+  &:hover {
+    background: #3a4358;
+  }
+}
+
+/* Element Plus 暗色主题覆盖 */
+.el-container {
+  background-color: var(--safeline-bg-primary);
+}
+
+.el-header {
+  background-color: var(--safeline-bg-secondary);
+  border-bottom: 1px solid var(--safeline-border-color);
+  color: var(--safeline-text-primary);
+}
+
+.el-aside {
+  background-color: var(--safeline-bg-secondary);
+  border-right: 1px solid var(--safeline-border-color);
+}
+
+.el-main {
+  background-color: var(--safeline-bg-primary);
+  color: var(--safeline-text-primary);
+}
+
+.el-menu {
+  background-color: var(--safeline-bg-secondary);
+  border-right: none;
+
+  .el-menu-item,
+  .el-sub-menu__title {
+    color: var(--safeline-text-secondary);
+
+    &:hover {
+      background-color: var(--safeline-bg-hover);
+      color: var(--safeline-text-primary);
+    }
+
+    &.is-active {
+      background-color: var(--safeline-primary);
+      color: var(--safeline-text-primary);
+    }
+  }
+}
+
+.el-card {
+  background-color: var(--safeline-bg-secondary);
+  border: 1px solid var(--safeline-border-color);
+  color: var(--safeline-text-primary);
+
+  .el-card__header {
+    border-bottom: 1px solid var(--safeline-border-color);
+    color: var(--safeline-text-primary);
+  }
+}
+
+.el-table {
+  background-color: var(--safeline-bg-secondary);
+  color: var(--safeline-text-primary);
+
+  th,
+  tr {
+    background-color: var(--safeline-bg-secondary);
+    color: var(--safeline-text-primary);
+  }
+
+  td {
+    border-bottom: 1px solid var(--safeline-border-color);
+  }
+
+  &--enable-row-hover .el-table__body tr:hover > td {
+    background-color: var(--safeline-bg-hover);
+  }
+}
+
+.el-input {
+  .el-input__wrapper {
+    background-color: var(--safeline-bg-tertiary);
+    border: 1px solid var(--safeline-border-color);
+    box-shadow: none;
+
+    &:hover {
+      border-color: var(--safeline-border-light);
+    }
+
+    &.is-focus {
+      border-color: var(--safeline-primary);
+    }
+  }
+
+  .el-input__inner {
+    color: var(--safeline-text-primary);
+
+    &::placeholder {
+      color: var(--safeline-text-tertiary);
+    }
+  }
+}
+
+.el-button {
+  &--primary {
+    background-color: var(--safeline-primary);
+    border-color: var(--safeline-primary);
+
+    &:hover {
+      background-color: var(--safeline-primary-light);
+      border-color: var(--safeline-primary-light);
+    }
+  }
+}
+
+.el-dialog {
+  background-color: var(--safeline-bg-secondary);
+  border: 1px solid var(--safeline-border-color);
+
+  .el-dialog__header {
+    border-bottom: 1px solid var(--safeline-border-color);
+
+    .el-dialog__title {
+      color: var(--safeline-text-primary);
+    }
+  }
+
+  .el-dialog__body {
+    color: var(--safeline-text-primary);
+  }
+}
+
+/* 工具类 */
+.text-primary {
+  color: var(--safeline-text-primary) !important;
+}
+
+.text-secondary {
+  color: var(--safeline-text-secondary) !important;
+}
+
+.text-tertiary {
+  color: var(--safeline-text-tertiary) !important;
+}
+
+.bg-primary {
+  background-color: var(--safeline-bg-primary) !important;
+}
+
+.bg-secondary {
+  background-color: var(--safeline-bg-secondary) !important;
+}
+
+.bg-tertiary {
+  background-color: var(--safeline-bg-tertiary) !important;
+}
+
+/* 威胁等级标签 */
+.threat-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--safeline-radius-sm);
+  font-size: 12px;
+  font-weight: 500;
+
+  &.low {
+    background-color: rgba(16, 185, 129, 0.1);
+    color: var(--threat-low);
+    border: 1px solid var(--threat-low);
+  }
+
+  &.medium {
+    background-color: rgba(245, 158, 11, 0.1);
+    color: var(--threat-medium);
+    border: 1px solid var(--threat-medium);
+  }
+
+  &.high {
+    background-color: rgba(249, 115, 22, 0.1);
+    color: var(--threat-high);
+    border: 1px solid var(--threat-high);
+  }
+
+  &.critical {
+    background-color: rgba(220, 38, 38, 0.1);
+    color: var(--threat-critical);
+    border: 1px solid var(--threat-critical);
+  }
+}
+
+/* 数据卡片 */
+.stat-card {
+  background: linear-gradient(135deg, var(--safeline-bg-secondary) 0%, var(--safeline-bg-tertiary) 100%);
+  border: 1px solid var(--safeline-border-color);
+  border-radius: var(--safeline-radius-lg);
+  padding: 20px;
+  transition: all 0.3s ease;
+
+  &:hover {
+    border-color: var(--safeline-primary);
+    box-shadow: var(--safeline-shadow-lg);
+    transform: translateY(-2px);
+  }
+
+  .stat-value {
+    font-size: 32px;
+    font-weight: 700;
+    color: var(--safeline-primary);
+    margin: 10px 0;
+  }
+
+  .stat-label {
+    color: var(--safeline-text-secondary);
+    font-size: 14px;
+  }
+}
+
+/* 动画 */
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.animate-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* 响应式 */
+@media (max-width: 768px) {
+  .el-aside {
+    width: 200px !important;
+  }
+}
