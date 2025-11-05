@@ -9,9 +9,11 @@ pyrogram==2.0.106
 TGCrypto==1.2.5
 python-telegram-bot==20.7
 
-# 数据库
-motor==3.3.2  # MongoDB 异步驱动
-pymongo==4.6.1
+# 数据库 - MySQL
+SQLAlchemy==2.0.23
+pymysql==1.1.0
+aiomysql==0.2.0
+cryptography==41.0.7  # PyMySQL 需要
 redis==5.0.1
 
 # 认证和安全
